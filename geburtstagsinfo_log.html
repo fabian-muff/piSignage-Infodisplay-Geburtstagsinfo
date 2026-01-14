@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎂 Geburtstage diese Woche</title>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    .slider {
+      display: flex;
+      overflow-x: auto;
+      gap: 1rem;
+      scroll-snap-type: x mandatory;
+      padding: 1rem 0;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .slide {
+      flex: 0 0 300px;
+      background: white;
+      border-radius: 20px;
+      padding: 1rem;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      scroll-snap-align: center;
+      transition: transform 0.3s;
+    }
+
+    .slide:hover {
+      transform: scale(1.03);
+    }
+
+    .slide.today {
+      position: relative;
+      border-radius: 20px;
+      transform: translateY(-8px) scale(1.02);
+      box-shadow: 0 10px 30px rgba(255, 197, 79, 0.18), 0 0 0 6px rgba(255, 213, 79, 0.06);
+      transition: transform 300ms ease, box-shadow 300ms ease;
+      z-index: 1;
+      overflow: visible;
+    }
+
+    .slide.today::after {
+      content: "";
+      position: absolute;
+      inset: -6px;
+      border-radius: 24px;
+      background: linear-gradient(90deg, rgba(255, 213, 79, 0.16), rgba(255, 183, 77, 0.28), rgba(255, 213, 79, 0.16));
+      filter: blur(8px);
+      z-index: -1;
+      opacity: 0.95;
+      background-size: 200% 100%;
+      animation: shimmer 3s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes shimmer {
+      0% {
+        background-position: 0% 50%;
+      }
+
+      50% {
+        background-position: 100% 50%;
+      }
+
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+
+    .foto {
+      width: 100%;
+      height: 200px;
+      border-radius: 15px;
+      background: #ddd center/cover no-repeat;
+      margin-bottom: 1rem;
+    }
+
+    #error {
+      color: #800;
+      margin-top: 1rem;
+      display: none;
+    }
+
+    /* log panel */
+    #log {
+      max-height: 200px;
+      overflow: auto;
+      text-align: left;
+      background: #111;
+      color: #e6e6e6;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      margin: 1rem auto;
+      width: min(100%, 900px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    #log .entry {
+      margin-bottom: 0.35rem;
+    }
+
+    #log .time {
+      color: #9aa;
+      margin-right: .5rem;
+    }
+
+    #log .level-info {
+      color: #9ef;
+    }
+
+    #log .level-warn {
+      color: #ffa;
+    }
+
+    #log .level-error {
+      color: #f99;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>🎂 Geburtstage diese Woche</h1>
+  <div id="error" role="alert"></div>
+  <div id="output" class="slider"></div>
+  <!-- in-page log output -->
+  <div id="log" role="log" aria-live="polite"></div>
+
+  <!-- load SheetJS to parse .xlsx in the browser -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <script>
+    // simple in-page logger
+    const MEDIA_BASE_URL = 'http://localhost:5000/files';
+
+    function log(message, level = 'info') {
+      try {
+        const container = document.getElementById('log');
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement('div');
+        entry.className = 'entry level-' + level;
+        entry.innerHTML = `<span class="time">[${time}]</span><span class="msg">${escapeHtml(String(message))}</span>`;
+        if (container) {
+          container.appendChild(entry);
+          container.scrollTop = container.scrollHeight;
+        }
+      } catch (e) {
+        // fallback to console
+        console.log('[log error]', e);
+      }
+      // always forward to console for developer debugging
+      if (level === 'error') console.error(message); else if (level === 'warn') console.warn(message); else console.log(message);
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>\"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      log('DOM loaded, starting app');
+      try {
+        log(`Fetching XLSX: ${MEDIA_BASE_URL}/geburtstage.xlsx`);
+        const resp = await fetch(`${MEDIA_BASE_URL}/geburtstage.xlsx`);
+        if (!resp.ok) throw new Error('Datei nicht gefunden');
+        log('XLSX fetch successful, reading arrayBuffer');
+        const arrayBuffer = await resp.arrayBuffer();
+        const rows = parseXLSX(arrayBuffer);
+        log(`Parsed ${rows.length} rows from XLSX`);
+        handleRows(rows);
+      } catch (err) {
+        log('Failed to load XLSX: ' + err.message, 'error');
+        showError('XLSX konnte nicht geladen werden: ' + err.message);
+      }
+    });
+
+    function parseXLSX(buffer) {
+      const data = new Uint8Array(buffer);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheet];
+      // Convert sheet to array of objects using first row as headers
+      const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+      return rows;
+    }
+
+    function handleRows(rows) {
+      try {
+        log('Processing rows to determine birthdays this week');
+        const heute = new Date();
+
+        // Wochentag: Montag = 1 ... Sonntag = 7
+        const wochentagHeute = heute.getDay() === 0 ? 7 : heute.getDay();
+        const diffToMonday = wochentagHeute - 1;
+        const monday = new Date(heute);
+        monday.setDate(heute.getDate() - diffToMonday);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+
+        const geburtstage = rows.filter(r => {
+          const einwilligung = r["Welche Informationen dürfen wir für die Anzeige verwenden?"]?.trim();
+          if (einwilligung === "🔴 Keine Anzeige: Ich möchte nicht, dass diese Information veröffentlicht wird.") return false;
+
+          const geb = parseDate(r["Geburtsdatum"]);
+          if (!geb || isNaN(geb.getTime())) return false;
+
+          // Wir setzen das Jahr auf das aktuelle Jahr, um den Wochentag zu prüfen
+          const gebAktuellJahr = new Date(heute.getFullYear(), geb.getMonth(), geb.getDate());
+          return gebAktuellJahr >= monday && gebAktuellJahr <= sunday;
+        });
+
+        log(`Found ${geburtstage.length} matching birthdays for the week`);
+        renderGeburtstage(geburtstage);
+      } catch (err) {
+        log('Error while processing XLSX rows: ' + err.message, 'error');
+        showError('Fehler beim Verarbeiten der XLSX: ' + err.message);
+      }
+    }
+
+    function handleFileContent(text) {
+      try {
+        log('Processing CSV content input');
+        const rows = parseCSV(text, ';');
+        const heute = new Date();
+
+        // Wochentag: Montag = 1 ... Sonntag = 7
+        const wochentagHeute = heute.getDay() === 0 ? 7 : heute.getDay();
+        const diffToMonday = wochentagHeute - 1;
+        const monday = new Date(heute);
+        monday.setDate(heute.getDate() - diffToMonday);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+
+        const geburtstage = rows.filter(r => {
+          const einwilligung = r["Welche Informationen dürfen wir für die Anzeige verwenden?"]?.trim();
+          if (einwilligung === "🔴 Keine Anzeige: Ich möchte nicht, dass diese Information veröffentlicht wird.") return false;
+
+          const geb = parseDate(r["Geburtsdatum"]);
+          if (!geb || isNaN(geb.getTime())) return false;
+
+          // Wir setzen das Jahr auf das aktuelle Jahr, um den Wochentag zu prüfen
+          const gebAktuellJahr = new Date(heute.getFullYear(), geb.getMonth(), geb.getDate());
+          return gebAktuellJahr >= monday && gebAktuellJahr <= sunday;
+        });
+
+        log(`Found ${geburtstage.length} matching birthdays for the week (from CSV)`);
+        renderGeburtstage(geburtstage);
+      } catch (err) {
+        log('Error while processing CSV content: ' + err.message, 'error');
+        showError('Fehler beim Verarbeiten der CSV: ' + err.message);
+      }
+    }
+
+    function parseCSV(text, delimiter = ';') {
+      const lines = text.trim().split(/\r?\n/);
+      const headers = lines[0].split(delimiter).map(h => h.trim());
+      return lines.slice(1).map(line => {
+        const values = line.split(delimiter).map(v => v.trim());
+        const row = {};
+        headers.forEach((h, i) => row[h] = values[i] ?? "");
+        return row;
+      });
+    }
+
+    function renderGeburtstage(geburtstage) {
+      const output = document.getElementById("output");
+      const error = document.getElementById("error");
+      output.innerHTML = "";
+      error.style.display = "none";
+
+      log('Rendering ' + geburtstage.length + ' slide(s)');
+
+      // sort birthdays by month/day within the current year
+      geburtstage.sort((a, b) => {
+        const da = parseDate(a["Geburtsdatum"]);
+        const db = parseDate(b["Geburtsdatum"]);
+        if (!da || !db) return 0;
+        const now = new Date();
+        const d1 = new Date(now.getFullYear(), da.getMonth(), da.getDate());
+        const d2 = new Date(now.getFullYear(), db.getMonth(), db.getDate());
+        return d1 - d2;
+      });
+
+      if (geburtstage.length === 0) {
+        output.innerHTML = "<p>Diese Woche hat niemand Geburtstag 🎉</p>";
+        log('No birthdays this week');
+        return;
+      }
+
+      const weekdays = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+
+      geburtstage.forEach(p => {
+        const einwilligung = p["Welche Informationen dürfen wir für die Anzeige verwenden?"];
+        const slide = document.createElement("div");
+        slide.className = "slide";
+
+        const filename = p["Dateiname Foto"]?.trim();
+        const fotoUrl = filename ? `${MEDIA_BASE_URL}/${filename}` : null;
+        const placeholderUrl = `${MEDIA_BASE_URL}/anonymous.jpg`;
+
+        const fotoStyle = fotoUrl
+          ? `background-image: url('${fotoUrl}');`
+          : `background-image: url('${placeholderUrl}');`;
+
+        const geb = parseDate(p["Geburtsdatum"]);
+        const gebAktuellJahr = new Date(new Date().getFullYear(), geb.getMonth(), geb.getDate());
+        const weekday = weekdays[gebAktuellJahr.getDay()];
+
+        let html = `<h3>${p.Name}</h3>
+                <p>Geburtstag: ${weekday}, ${formatDate(p["Geburtsdatum"]).slice(0, -5)}</p>`;
+
+        // mark if birthday is today (day+month)
+        const now = new Date();
+        const isToday = geb && geb.getDate() === now.getDate() && (geb.getMonth() + 1) === (now.getMonth() + 1);
+        if (isToday) {
+          slide.classList.add('today');
+          log(`${p.Name} has birthday today`, 'info');
+        }
+
+        if (einwilligung?.startsWith("🟢")) {
+          // Consent for photo: use provided photo or portrait1.jpg
+          html = `<div class="foto" style="${fotoStyle}"></div>` + html;
+        } else if (einwilligung?.startsWith("🟡")) {
+          // Consent: show date only but display portrait2.jpg as placeholder for privacy
+          html = `<div class="foto" style="background-image: url('${placeholderUrl}');"></div>` + html;
+        }
+
+        slide.innerHTML = html;
+        output.appendChild(slide);
+      });
+
+      log('Finished rendering slides');
+    }
+
+    function formatDate(dateStr) {
+      const d = parseDate(dateStr);
+      return d && !isNaN(d.getTime()) ? d.toLocaleDateString('de-DE') : String(dateStr || '');
+    }
+
+    function parseDate(value) {
+      if (!value) return null;
+      if (value instanceof Date) return value;
+      if (typeof value === 'number' && isFinite(value)) {
+        const excelEpoch = new Date(1899, 11, 30);
+        return new Date(excelEpoch.getTime() + value * 86400000);
+      }
+      const s = String(value).trim();
+      const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+      if (m) {
+        const [, d, mo, y] = m.map(Number);
+        const year = y < 100 ? (y >= 70 ? 1900 + y : 2000 + y) : y;
+        return new Date(year, mo - 1, d);
+      }
+      const parsed = new Date(s);
+      return !isNaN(parsed.getTime()) ? parsed : null;
+    }
+
+    function showError(msg) {
+      const err = document.getElementById("error");
+      err.textContent = msg;
+      err.style.display = "block";
+      log(msg, 'error');
+    }
+  </script>
+
+</body>
+
+</html>
