@@ -7,50 +7,63 @@
   <title>🎂 Geburtstage diese Woche</title>
 
   <style>
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+    }
+
     body {
       font-family: system-ui, sans-serif;
       background: #f5f5f5;
       margin: 0;
-      padding: 2rem;
+      padding: 1rem;
       text-align: center;
+      display: flex;
+      flex-direction: column;
     }
 
     h1 {
       color: #333;
+      margin: 0.5rem 0;
+      flex: 0 0 auto;
     }
 
     .slider {
-      display: flex;
-      overflow-x: auto;
+      display: grid;
       gap: 1rem;
-      scroll-snap-type: x mandatory;
-      padding: 1rem 0;
-      justify-content: center;
-      flex-wrap: wrap;
+      padding: 0;
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      /* Crucial for nested flex/grid scrolling */
+      align-content: stretch;
+      justify-content: stretch;
     }
 
     .slide {
-      flex: 0 0 300px;
       background: white;
       border-radius: 20px;
       padding: 1rem;
       box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-      scroll-snap-align: center;
-      transition: transform 0.3s;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
     }
 
     .slide:hover {
-      transform: scale(1.03);
+      transform: scale(1.01);
+      z-index: 10;
     }
 
     .slide.today {
       position: relative;
       border-radius: 20px;
-      transform: translateY(-8px) scale(1.02);
+      /* Reduced scale to avoid layout issues in grid */
       box-shadow: 0 10px 30px rgba(255, 197, 79, 0.18), 0 0 0 6px rgba(255, 213, 79, 0.06);
-      transition: transform 300ms ease, box-shadow 300ms ease;
-      z-index: 1;
-      overflow: visible;
+      z-index: 5;
     }
 
     .slide.today::after {
@@ -83,16 +96,65 @@
 
     .foto {
       width: 100%;
-      height: 200px;
-      border-radius: 15px;
-      background: #ddd center/cover no-repeat;
-      margin-bottom: 1rem;
+      flex: 1;
+      min-height: 0;
+      border-radius: 12px;
+      background: #ddd center/contain no-repeat;
+      /* Changed to contain so whole face is visible if aspect ratio mismatch */
+      background-size: cover;
+      /* Use cover nicely mostly */
+      margin-bottom: 0.5em;
+    }
+
+    .slide h3 {
+      margin: 0.2em 0;
+    }
+
+    .slide p {
+      margin: 0;
     }
 
     #error {
       color: #800;
       margin-top: 1rem;
       display: none;
+    }
+
+    /* log panel */
+    #log {
+      max-height: 200px;
+      overflow: auto;
+      text-align: left;
+      background: #111;
+      color: #e6e6e6;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      margin: 1rem auto;
+      width: min(100%, 900px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    #log .entry {
+      margin-bottom: 0.35rem;
+    }
+
+    #log .time {
+      color: #9aa;
+      margin-right: .5rem;
+    }
+
+    #log .level-info {
+      color: #9ef;
+    }
+
+    #log .level-warn {
+      color: #ffa;
+    }
+
+    #log .level-error {
+      color: #f99;
     }
   </style>
 </head>
@@ -101,22 +163,80 @@
 
   <h1>🎂 Geburtstage diese Woche</h1>
   <div id="error" role="alert"></div>
+
   <div id="output" class="slider"></div>
+  <!-- in-page log output will be created dynamically if needed -->
 
   <!-- load SheetJS to parse .xlsx in the browser -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
   <script>
-    const MEDIA_BASE_URL = 'http://localhost:5000/files';
+
+
+    // Logging flag: if true, log to the div; otherwise, log only to the console
+    let html_log = false;
+    // const MEDIA_BASE_URL = 'http://localhost:5000/files';
+    const MEDIA_BASE_URL = 'geburtstage';
+    
+    // Store data globally to allow re-render on resize
+    let currentGeburtstage = [];
+
+    // Dynamically create the log div if html_log is true
+    if (html_log) {
+      if (!document.getElementById('log')) {
+        const logDiv = document.createElement('div');
+        logDiv.id = 'log';
+        logDiv.setAttribute('role', 'log');
+        logDiv.setAttribute('aria-live', 'polite');
+        document.body.insertBefore(logDiv, document.body.querySelector('script'));
+      }
+    }
+
+    function log(message, level = 'info') {
+      if (html_log) {
+        try {
+          const container = document.getElementById('log');
+          const time = new Date().toLocaleTimeString();
+          const entry = document.createElement('div');
+          entry.className = 'entry level-' + level;
+          entry.innerHTML = `<span class="time">[${time}]</span><span class="msg">${escapeHtml(String(message))}</span>`;
+          if (container) {
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+          }
+        } catch (e) {
+          // fallback to console
+          console.log('[log error]', e);
+        }
+      } else {
+        if (level === 'error') console.error(message);
+        else if (level === 'warn') console.warn(message);
+        else console.log(message);
+      }
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>\"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
 
     document.addEventListener('DOMContentLoaded', async () => {
+      log('DOM loaded, starting app');
       try {
+        log(`Fetching XLSX: ${MEDIA_BASE_URL}/geburtstage.xlsx`);
         const resp = await fetch(`${MEDIA_BASE_URL}/geburtstage.xlsx`);
+        if (resp.ok) {
+          log(`Fetch from MEDIA_BASE_URL (${MEDIA_BASE_URL}) successful (Status: ${resp.status})`);
+        } else {
+          log(`Fetch from MEDIA_BASE_URL (${MEDIA_BASE_URL}) failed (Status: ${resp.status})`, 'warn');
+        }
         if (!resp.ok) throw new Error('Datei nicht gefunden');
+        log('XLSX fetch successful, reading arrayBuffer');
         const arrayBuffer = await resp.arrayBuffer();
         const rows = parseXLSX(arrayBuffer);
+        log(`Parsed ${rows.length} rows from XLSX`);
         handleRows(rows);
       } catch (err) {
+        log('Failed to load XLSX: ' + err.message, 'error');
         showError('XLSX konnte nicht geladen werden: ' + err.message);
       }
     });
@@ -133,6 +253,7 @@
 
     function handleRows(rows) {
       try {
+        log('Processing rows to determine birthdays this week');
         const heute = new Date();
 
         // Wochentag: Montag = 1 ... Sonntag = 7
@@ -155,14 +276,18 @@
           return gebAktuellJahr >= monday && gebAktuellJahr <= sunday;
         });
 
+        log(`Found ${geburtstage.length} matching birthdays for the week`);
+        currentGeburtstage = geburtstage;
         renderGeburtstage(geburtstage);
       } catch (err) {
+        log('Error while processing XLSX rows: ' + err.message, 'error');
         showError('Fehler beim Verarbeiten der XLSX: ' + err.message);
       }
     }
 
     function handleFileContent(text) {
       try {
+        log('Processing CSV content input');
         const rows = parseCSV(text, ';');
         const heute = new Date();
 
@@ -186,8 +311,11 @@
           return gebAktuellJahr >= monday && gebAktuellJahr <= sunday;
         });
 
+        log(`Found ${geburtstage.length} matching birthdays for the week (from CSV)`);
+        currentGeburtstage = geburtstage;
         renderGeburtstage(geburtstage);
       } catch (err) {
+        log('Error while processing CSV content: ' + err.message, 'error');
         showError('Fehler beim Verarbeiten der CSV: ' + err.message);
       }
     }
@@ -203,11 +331,64 @@
       });
     }
 
+    function calculateGrid(count) {
+      if (count === 0) return { rows: 1, cols: 1 };
+      
+      // Calculate aspect ratio of current window for optimization
+      const aspect = window.innerWidth / (window.innerHeight - 100); // 100px roughly for header/margin
+      
+      // Try to maintain a nice card aspect ratio (e.g., vertical card ~ 3:4)
+      // cardRatio = (W/cols) / (H/rows)
+      // We want cardRatio ~ 0.75
+      
+      // Heuristic:
+      // rows * cols >= count
+      // cols / rows * (1/aspect) should be close to 0.75
+      // cols / rows ~= 0.75 * aspect
+      
+      const idealRatio = 0.75 * aspect;
+      
+      let bestRows = 1;
+      let bestCols = count;
+      let minDiff = Infinity;
+
+      for (let r = 1; r <= count; r++) {
+         const c = Math.ceil(count / r);
+         const ratio = c / r;
+         const diff = Math.abs(ratio - idealRatio);
+         
+         if (diff < minDiff) {
+            minDiff = diff;
+            bestRows = r;
+            bestCols = c;
+         }
+      }
+      
+      return { rows: bestRows, cols: bestCols };
+    }
+
     function renderGeburtstage(geburtstage) {
       const output = document.getElementById("output");
       const error = document.getElementById("error");
       output.innerHTML = "";
       error.style.display = "none";
+
+      log('Rendering ' + geburtstage.length + ' slide(s)');
+
+      // If no birthdays, clear grid
+      if (geburtstage.length === 0) {
+        output.style.display = 'block'; // reset grid
+        output.innerHTML = "<p>Diese Woche hat niemand Geburtstag 🎉</p>";
+        log('No birthdays this week');
+        return;
+      }
+      
+      // Apply Grid Strategy
+      const { rows, cols } = calculateGrid(geburtstage.length);
+      output.style.display = 'grid';
+      output.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      output.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
 
       // sort birthdays by month/day within the current year
       geburtstage.sort((a, b) => {
@@ -219,11 +400,6 @@
         const d2 = new Date(now.getFullYear(), db.getMonth(), db.getDate());
         return d1 - d2;
       });
-
-      if (geburtstage.length === 0) {
-        output.innerHTML = "<p>Diese Woche hat niemand Geburtstag 🎉</p>";
-        return;
-      }
 
       const weekdays = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
 
@@ -240,41 +416,91 @@
         const gebAktuellJahr = new Date(new Date().getFullYear(), geb.getMonth(), geb.getDate());
         const weekday = weekdays[gebAktuellJahr.getDay()];
 
-        let html = `<h3>${p.Name}</h3>
-                <p>Geburtstag: ${weekday}, ${formatDate(p["Geburtsdatum"]).slice(0, -5)}</p>`;
-
         // mark if birthday is today (day+month)
         const now = new Date();
         const isToday = geb && geb.getDate() === now.getDate() && (geb.getMonth() + 1) === (now.getMonth() + 1);
         if (isToday) {
           slide.classList.add('today');
+          log(`${p.Name} has birthday today`, 'info');
         }
 
         // Create the foto div and check if the image exists
         let fotoDiv = document.createElement('div');
         fotoDiv.className = 'foto';
+        let showFoto = false;
+
         if (einwilligung?.startsWith("🟢") && fotoUrl) {
+          showFoto = true;
           // Try to load the image, fallback to anonymous.jpg if it fails
           let img = new window.Image();
-          img.onload = function() {
+          img.onload = function () {
             fotoDiv.style.backgroundImage = `url('${fotoUrl}')`;
           };
-          img.onerror = function() {
+          img.onerror = function () {
             fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
           };
           img.src = fotoUrl;
           // Set fallback first, will be replaced if image loads
           fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
-          html = fotoDiv.outerHTML + html;
         } else if (einwilligung?.startsWith("🟡")) {
+          showFoto = true;
           fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
-          html = fotoDiv.outerHTML + html;
         }
 
-        slide.innerHTML = html;
+        if (showFoto) {
+          slide.appendChild(fotoDiv);
+        }
+
+        const infoHtml = `<h3>${p.Name}</h3>
+                <p>Geburtstag: ${weekday}, ${formatDate(p["Geburtsdatum"]).slice(0, -5)}</p>`;
+        slide.insertAdjacentHTML('beforeend', infoHtml);
+
         output.appendChild(slide);
       });
+      
+      // Adjust font sizes based on space
+      requestAnimationFrame(() => {
+         adjustFontSizes();
+      });
+
+      log('Finished rendering slides');
     }
+    
+    function adjustFontSizes() {
+        const slides = document.querySelectorAll('.slide');
+        if (slides.length === 0) return;
+        
+        // Base calculation on the height of the first slide
+        const h = slides[0].clientHeight;
+        const w = slides[0].clientWidth;
+        
+        // Simple scaling heuristic
+        // Smaller dimension dictates size
+        const size = Math.min(w, h);
+        
+        // Scale font relative to card size
+        // e.g. 20px for a 300px card
+        const fontSizeTitle = Math.max(16, Math.floor(size * 0.08)) + 'px';
+        const fontSizeText = Math.max(12, Math.floor(size * 0.05)) + 'px';
+        
+        slides.forEach(s => {
+            const h3 = s.querySelector('h3');
+            if (h3) h3.style.fontSize = fontSizeTitle;
+            const p = s.querySelector('p');
+            if (p) p.style.fontSize = fontSizeText;
+        });
+    }
+
+    // Re-calculate grid on resize
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            if(currentGeburtstage && currentGeburtstage.length > 0) {
+                renderGeburtstage(currentGeburtstage);
+            }
+        }, 100);
+    });
 
     function formatDate(dateStr) {
       const d = parseDate(dateStr);
@@ -303,6 +529,7 @@
       const err = document.getElementById("error");
       err.textContent = msg;
       err.style.display = "block";
+      log(msg, 'error');
     }
   </script>
 
