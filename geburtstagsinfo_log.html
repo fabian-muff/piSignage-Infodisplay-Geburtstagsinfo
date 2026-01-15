@@ -177,6 +177,11 @@
       try {
         log(`Fetching XLSX: ${MEDIA_BASE_URL}/geburtstage.xlsx`);
         const resp = await fetch(`${MEDIA_BASE_URL}/geburtstage.xlsx`);
+        if (resp.ok) {
+          log(`Fetch from MEDIA_BASE_URL (${MEDIA_BASE_URL}) successful (Status: ${resp.status})`);
+        } else {
+          log(`Fetch from MEDIA_BASE_URL (${MEDIA_BASE_URL}) failed (Status: ${resp.status})`, 'warn');
+        }
         if (!resp.ok) throw new Error('Datei nicht gefunden');
         log('XLSX fetch successful, reading arrayBuffer');
         const arrayBuffer = await resp.arrayBuffer();
