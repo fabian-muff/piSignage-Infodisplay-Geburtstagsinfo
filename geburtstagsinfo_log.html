@@ -318,10 +318,6 @@
         const fotoUrl = filename ? `${MEDIA_BASE_URL}/${filename}` : null;
         const placeholderUrl = `${MEDIA_BASE_URL}/anonymous.jpg`;
 
-        const fotoStyle = fotoUrl
-          ? `background-image: url('${fotoUrl}');`
-          : `background-image: url('${placeholderUrl}');`;
-
         const geb = parseDate(p["Geburtsdatum"]);
         const gebAktuellJahr = new Date(new Date().getFullYear(), geb.getMonth(), geb.getDate());
         const weekday = weekdays[gebAktuellJahr.getDay()];
@@ -337,12 +333,25 @@
           log(`${p.Name} has birthday today`, 'info');
         }
 
-        if (einwilligung?.startsWith("🟢")) {
-          // Consent for photo: use provided photo or portrait1.jpg
-          html = `<div class="foto" style="${fotoStyle}"></div>` + html;
+        // Create the foto div and check if the image exists
+        let fotoDiv = document.createElement('div');
+        fotoDiv.className = 'foto';
+        if (einwilligung?.startsWith("🟢") && fotoUrl) {
+          // Try to load the image, fallback to anonymous.jpg if it fails
+          let img = new window.Image();
+          img.onload = function() {
+            fotoDiv.style.backgroundImage = `url('${fotoUrl}')`;
+          };
+          img.onerror = function() {
+            fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
+          };
+          img.src = fotoUrl;
+          // Set fallback first, will be replaced if image loads
+          fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
+          html = fotoDiv.outerHTML + html;
         } else if (einwilligung?.startsWith("🟡")) {
-          // Consent: show date only but display portrait2.jpg as placeholder for privacy
-          html = `<div class="foto" style="background-image: url('${placeholderUrl}');"></div>` + html;
+          fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
+          html = fotoDiv.outerHTML + html;
         }
 
         slide.innerHTML = html;
