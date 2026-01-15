@@ -25,8 +25,26 @@ This guide describes a small server intended to run on a Raspberry Pi alongside 
   - `GET /files/<filename>` — serves the file content
 
 ---
+# 🚀 Installation & Setup
 
-## 🚀 Installation & setup
+You can either use the automated installer or set it up manually.
+
+## 🤖 Automated Installation (Recommended)
+Die Installation kann automatisiert werden:
+- Erstelle eine neue Datei auf dem Pi: 
+```bash
+nano install_mediaserver.sh
+```
+- Füge den Inhalt aus install_mediaserver.sh ein.
+- Skript ausführbar machen
+```bash
+chmod +x install_mediaserver.sh
+```
+- Skript starten:
+```bash
+./install_mediaserver.sh
+```
+## 🚀 Manual installation
 
 Follow the steps below on the Raspberry Pi (Raspbian / Raspberry Pi OS).
 
@@ -210,19 +228,6 @@ sudo systemctl daemon-reload
 - Works with the USB auto-copy script used by this project
 
 
-# Auto Installation
-Die Installation kann automatisiert werden:
-- Erstelle eine neue Datei auf dem Pi: 
-```bash
-nano install_mediaserver.sh
-```
-- Füge den Inhalt aus install_mediaserver.sh ein.
-- Skript ausführbar machen
-```bash
-chmod +x install_mediaserver.sh
-```
-- Skript starten:
-```bash
-./install_mediaserver.sh
-```
+
+
 
