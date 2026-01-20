@@ -101,7 +101,7 @@
       border-radius: 12px;
       background: #ddd center/contain no-repeat;
       /* Changed to contain so whole face is visible if aspect ratio mismatch */
-      background-size: cover;
+      background-size: contain;
       /* Use cover nicely mostly */
       margin-bottom: 0.5em;
     }
@@ -431,17 +431,38 @@
 
         if (einwilligung?.startsWith("🟢") && fotoUrl) {
           showFoto = true;
-          // Try to load the image, fallback to anonymous.jpg if it fails
-          let img = new window.Image();
-          img.onload = function () {
-            fotoDiv.style.backgroundImage = `url('${fotoUrl}')`;
-          };
-          img.onerror = function () {
-            fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
-          };
-          img.src = fotoUrl;
-          // Set fallback first, will be replaced if image loads
+          // Set fallback first
           fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
+
+          // Helper to attempt loading with extension case fallback
+          const tryLoadImage = (url, allowRetry) => {
+            let img = new window.Image();
+            img.onload = function () {
+              fotoDiv.style.backgroundImage = `url('${url}')`;
+            };
+            img.onerror = function () {
+              if (allowRetry) {
+                // Try swapping case for common extensions
+                let nextUrl = null;
+                if (url.endsWith('.jpg')) nextUrl = url.replace(/\.jpg$/, '.JPG');
+                else if (url.endsWith('.JPG')) nextUrl = url.replace(/\.JPG$/, '.jpg');
+                else if (url.endsWith('.png')) nextUrl = url.replace(/\.png$/, '.PNG');
+                else if (url.endsWith('.PNG')) nextUrl = url.replace(/\.PNG$/, '.png');
+
+                if (nextUrl) {
+                   log(`Failed to load ${url}, trying ${nextUrl}`, 'warn');
+                   tryLoadImage(nextUrl, false);
+                   return;
+                }
+              }
+              // Final failure, ensure placeholder is kept (already set)
+              log(`Failed to load image: ${url}`, 'warn');
+            };
+            img.src = url;
+          };
+
+          tryLoadImage(fotoUrl, true);
+        
         } else if (einwilligung?.startsWith("🟡")) {
           showFoto = true;
           fotoDiv.style.backgroundImage = `url('${placeholderUrl}')`;
